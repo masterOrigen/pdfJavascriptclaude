@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Sonnet - GPT MEDIOS</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .tab { display: none; }
+        .tab-active { display: block; }
+        .question { background-color: #f0f0f0; padding: 10px; margin-bottom: 10px; }
+        .answer { background-color: #e0e0e0; padding: 10px; margin-bottom: 20px; }
+        #apiKeyInput { width: 100%; margin-bottom: 10px; }
+        textarea { width: 100%; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Claude Sonnet - GPT MEDIOS</h1>
+
+    <div>
+        <input type="password" id="apiKeyInput" placeholder="Ingrese su clave API de Anthropic">
+    </div>
+
+    <div>
+        <button onclick="openTab('general')">Chat General</button>
+        <button onclick="openTab('pdf')">Chat con PDF</button>
+    </div>
+
+    <div id="generalTab" class="tab">
+        <h2>Preguntas Generales</h2>
+        <textarea id="generalQuestion" rows="4" placeholder="Haga su nueva pregunta aquí"></textarea>
+        <button onclick="sendGeneralQuestion()">Enviar Pregunta</button>
+        <div id="generalChatHistory"></div>
+    </div>
+
+    <div id="pdfTab" class="tab">
+        <h2>Chat con PDF</h2>
+        <input type="file" id="pdfFile" accept=".pdf">
+        <button onclick="uploadPDF()">Subir PDF</button>
+        <div id="pdfContent" style="display: none;">
+            <textarea id="pdfQuestion" rows="4" placeholder="Haga una nueva pregunta sobre el archivo PDF"></textarea>
+            <button onclick="sendPDFQuestion()">Enviar Pregunta sobre el PDF</button>
+        </div>
+        <div id="pdfChatHistory"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.9.359/pdf.min.js"></script>
+    <script>
+        let apiKey = '';
+        let pdfText = '';
+
+        function openTab(tabName) {
+            document.querySelectorAll('.tab').forEach(tab => tab.style.display = 'none');
+            document.getElementById(tabName + 'Tab').style.display = 'block';
+        }
+
+        async function sendGeneralQuestion() {
+            const question = document.getElementById('generalQuestion').value;
+            if (!question) return;
+
+            apiKey = document.getElementById('apiKeyInput').value;
+            if (!apiKey) {
+                alert('Por favor, ingrese su clave API de Anthropic');
+                return;
+            }
+
+            try {
+                const response = await getChatResponse(question);
+                updateChatHistory('generalChatHistory', question, response);
+                document.getElementById('generalQuestion').value = '';
+            } catch (error) {
+                alert('Error al procesar la pregunta: ' + error.message);
+            }
+        }
+
+        async function uploadPDF() {
+            const fileInput = document.getElementById('pdfFile');
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                pdfText = await extractTextFromPDF(pdf);
+                document.getElementById('pdfContent').style.display = 'block';
+            } catch (error) {
+                alert('Error al procesar el PDF: ' + error.message);
+            }
+        }
+
+        async function sendPDFQuestion() {
+            const question = document.getElementById('pdfQuestion').value;
+            if (!question || !pdfText) return;
+
+            apiKey = document.getElementById('apiKeyInput').value;
+            if (!apiKey) {
+                alert('Por favor, ingrese su clave API de Anthropic');
+                return;
+            }
+
+            try {
+                const response = await getChatResponse(question, pdfText);
+                updateChatHistory('pdfChatHistory', question, response);
+                document.getElementById('pdfQuestion').value = '';
+            } catch (error) {
+                alert('Error al procesar la pregunta: ' + error.message);
+            }
+        }
+
+        async function getChatResponse(prompt, context = "") {
+            const systemPrompt = context
+                ? "Eres un asistente AI altamente preciso y confiable. Proporciona respuestas extremadamente detalladas, extensas y precisas basadas en la información disponible en el archivo PDF. Utiliza todo el espacio disponible para ofrecer la respuesta más completa posible. Si no tienes suficiente información para responder con certeza, indícalo claramente. Evita especulaciones y céntrate en hechos verificables del documento proporcionado."
+                : "Eres un asistente AI altamente preciso y confiable. Proporciona respuestas extremadamente detalladas, extensas y precisas basadas en tu conocimiento general. Utiliza todo el espacio disponible para ofrecer la respuesta más completa posible. Si no tienes suficiente información para responder con certeza, indícalo claramente. Evita especulaciones y céntrate en hechos verificables.";
+
+            const fullPrompt = context
+                ? `Contexto del archivo PDF:\n\n${context}\n\nPregunta del usuario: ${prompt}\n\nPor favor, responde a la pregunta basándote en el contenido del archivo PDF proporcionado. Sé lo más detallado y extenso posible en tu respuesta.`
+                : prompt;
+
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': apiKey,
+                    'anthropic-version': '2023-06-01'
+                },
+                body: JSON.stringify({
+                    model: 'claude-3-sonnet-20240229',
+                    max_tokens: 4090,
+                    temperature: 0,
+                    system: systemPrompt,
+                    messages: [
+                        { role: 'user', content: fullPrompt }
+                    ]
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Error en la respuesta de la API');
+            }
+
+            const data = await response.json();
+            return data.content[0].text;
+        }
+
+        function updateChatHistory(elementId, question, answer) {
+            const historyElement = document.getElementById(elementId);
+            const questionDiv = document.createElement('div');
+            questionDiv.className = 'question';
+            questionDiv.textContent = 'Pregunta: ' + question;
+            const answerDiv = document.createElement('div');
+            answerDiv.className = 'answer';
+            answerDiv.textContent = 'Respuesta: ' + answer;
+            historyElement.prepend(answerDiv);
+            historyElement.prepend(questionDiv);
+        }
+
+        async function extractTextFromPDF(pdf) {
+            let text = '';
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                text += content.items.map(item => item.str).join(' ') + '\n';
+            }
+            return text;
+        }
+
+        // Mostrar la pestaña general por defecto
+        openTab('general');
+    </script>
+</body>
+</html>
